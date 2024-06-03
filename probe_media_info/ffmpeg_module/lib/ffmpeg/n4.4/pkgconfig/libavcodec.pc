@@ -1,0 +1,14 @@
+prefix=./install/n4.4/
+exec_prefix=${prefix}
+libdir=./install/n4.4//lib
+includedir=./install/n4.4//include
+
+Name: libavcodec
+Description: FFmpeg codec library
+Version: 58.134.100
+Requires: 
+Requires.private: libswresample >= 3.9.100, libavutil >= 56.70.100
+Conflicts:
+Libs: -L${libdir}  -lavcodec 
+Libs.private: -pthread -lm -lz -L/home/liuzhi/work/information_techonogy/av/x264/install/stable/lib -lx264
+Cflags: -I${includedir}

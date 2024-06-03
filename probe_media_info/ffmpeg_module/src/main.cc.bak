@@ -1,0 +1,223 @@
+#include <cstdio>
+#include <unistd.h>
+#include <stdlib.h>
+#include <iostream>
+#include <fstream>
+#include <thread>
+#include <chrono>
+#include <functional>
+#include <vector>
+#include <csignal>
+#include <cstdlib>
+/* #include <boost/json.hpp>
+#include <boost/json/src.hpp> */
+#include "av_module_manager.h"
+#include "lz_utils.h"
+#include "lz_log.h"
+#include "my_config.h"
+
+// boost library hpp. Include only once globally.
+#include <boost/json/src.hpp>
+
+// spdlog
+#include <spdlog/spdlog.h>
+#include "spdlog/cfg/env.h" // for loading levels from the environment variable
+#include "spdlog/sinks/basic_file_sink.h"
+
+extern "C"
+{
+#include <libavcodec/avcodec.h>
+#include <libavformat/avformat.h>
+#include <libavdevice/avdevice.h>
+#include <libavutil/pixdesc.h>
+#include <libavutil/log.h>
+#include <libswscale/swscale.h>
+#include <libavfilter/avfilter.h>
+#include <libavfilter/buffersrc.h>
+#include <libavfilter/buffersink.h>
+}
+
+#pragma comment(lib, "avcodec.lib")
+#pragma comment(lib, "avdevice.lib")
+#pragma comment(lib, "avfilter.lib")
+#pragma comment(lib, "avformat.lib")
+#pragma comment(lib, "avutil.lib")
+#pragma comment(lib, "postproc.lib")
+#pragma comment(lib, "swresample.lib")
+#pragma comment(lib, "swscale.lib")
+
+// using namespace boost;
+
+void signalHandler(int signum)
+{
+	SPDLOG_INFO("Interrupt signal ({}) received.", signum);
+	// 清理并关闭
+	// 终止程序
+	exit(signum);
+}
+
+void init_spdlog();
+void ffmpeg_spdlog(void *avcl, int level, const char *fmt, va_list vl);
+
+int main(int args, char *argv[])
+{
+	init_spdlog();
+	SPDLOG_INFO("Hello FFmpeg!");
+
+	if (signal(SIGINT, signalHandler) == SIG_ERR)
+	{
+		SPDLOG_WARN("Can't catch the signal.");
+	}
+	if (signal(SIGKILL, signalHandler) == SIG_ERR)
+	{
+		SPDLOG_WARN("Can't catch the signal.");
+	}
+
+	av_log_set_flags(AV_LOG_TRACE); // AV_LOG_INFO  AV_LOG_DEBUG   AV_LOG_TRACE
+	av_log_set_callback(&ffmpeglog);
+	av_log_set_callback(&ffmpeg_spdlog);
+	av_register_all();
+	avcodec_register_all();
+	// avdevice_register_all();
+	// avfilter_register_all();
+	// avformat_network_init();
+
+	// av_log_set_level(AV_LOG_TRACE);
+	// av_register_all();
+	// avfilter_register_all();
+
+	/* 	error_code ec;
+		boost::json::value jv = boost::json::parse( "[1,2,3,4,5]", ec );
+		if( ec )
+			std::cout << "Parsing failed: " << ec.message() << "\n";
+		return 0; */
+
+	std::string input_parameter = "{ \"src_url\" : \"/home/liuzhi/Videos/a_bao_ji.mp4\", \"start_time\" : 1, \"duration\" : 20, \"dst_parameter\" : { \"mux_format\" : \"mp4\", \"video_format\" : \"h264\", \"audio_format\" : \"aac\", \"channels\" : 2, \"parameter\" :  { \"resolution\" : 480, \"frame_rate\" : 0, \"video_bitrate\" : 50000000, \"audio_bitrate\" : 128000 }}}";
+	boost::json::object transcode_parameter;
+	CMyConfig::GetInstance()->ParseInputParameter(input_parameter, transcode_parameter);
+
+	std::string /* src_media = "/home/liuzhi/Videos/dXGMw4VMaAeQu_WV.mp4", */ dst_media = "/home/liuzhi/Videos/a_bao_ji.mp4-output.mp4";
+
+	char *buffer;
+	buffer = getcwd(NULL, 0);
+	LzLog::Init(string2wstring(std::string(buffer).append("/")));
+
+	AvModuleManager manager(transcode_parameter);
+	manager.Start_1(dst_media, false, false);
+	std::this_thread::sleep_for(std::chrono::seconds(15));
+	manager.Stop();
+
+	LzLog::Uninit();
+	return 0;
+}
+
+void init_spdlog()
+{
+
+	time_t raw_time;
+	struct tm *time_info;
+	std::stringstream ss;
+	std::string str_time;
+
+	time(&raw_time);
+	time_info = localtime(&raw_time);
+	ss << asctime(time_info);
+	str_time = ss.str();
+	for (auto &&t : str_time)
+	{
+		if (t == ' ' || t == '\n')
+			t = '_';
+		if (t == ':')
+			t = '-';
+	}
+
+	// Set the default logger to file logger
+	auto file_logger = spdlog::basic_logger_mt("basic_logger",
+											   std::string("logs/") + std::string("Spdlog_") + str_time + std::string(".log"));
+	spdlog::set_default_logger(file_logger);
+	spdlog::set_level(spdlog::level::info);
+	// include/spdlog/pattern_formatter-inl.h 定义了pattern flag的含义
+	// 或者参考 https://github.com/gabime/spdlog/wiki/3.-Custom-formatting#pattern-flags
+	// %@ %s %g %# %! 一定要用 SPDLOG_TRACE(..), SPDLOG_INFO(...) etc，而不是 spdlog::trace(...)
+	spdlog::set_pattern("[%H:%M:%S][%^%l%$][%t][%!][%s:%#] %v");
+
+	SPDLOG_INFO("init_spdlog");
+	SPDLOG_INFO("You would get file name and line number.");
+
+	// 使用案例参考 spdlog/example/example.cpp
+	// SPDLOG_WARN("Easy padding in numbers like {:08d}", 12);
+	// SPDLOG_CRITICAL("Support for int: {0:d};  hex: {0:x};  oct: {0:o}; bin: {0:b}", 42);
+	// SPDLOG_INFO("Support for floats {:03.2f}", 1.23456);
+	// SPDLOG_INFO("Positional args are {1} {0}..", "too", "supported");
+	// SPDLOG_INFO("{:>8} aligned, {:<8} aligned", "right", "left");
+	return;
+}
+
+void ffmpeg_spdlog(void *avcl, int level, const char *fmt, va_list vl)
+{
+#define FFMPEG_SPDLOG
+#ifdef FFMPEG_SPDLOG
+	const int size = 1024;
+	static int flag = av_log_get_flags();
+	static char s_cache[size];
+	char s[size], out[size];
+	if (level > flag)
+		return;
+
+	memset(s, 0, size);
+	vsnprintf(s, size - 1, fmt, vl);
+	/* Maybe the end char is not '\n'. It means the line not finish. */
+	if (strlen(s) > 0 && s[strlen(s) - 1] != '\n')
+	{
+		snprintf(s_cache + strlen(s_cache), size - strlen(s_cache) - 1, s);
+		return;
+	}
+
+	memset(out, 0, size);
+	switch (level)
+	{
+	case AV_LOG_QUIET:
+		snprintf(out, size - 1, "AV_LOG_QUIET. ");
+		break;
+	case AV_LOG_PANIC:
+		snprintf(out, size - 1, "AV_LOG_PANIC. ");
+		break;
+	case AV_LOG_FATAL:
+		snprintf(out, size - 1, "AV_LOG_FATAL. ");
+		break;
+	case AV_LOG_ERROR:
+		snprintf(out, size - 1, "AV_LOG_ERROR. ");
+		break;
+	case AV_LOG_WARNING:
+		snprintf(out, size - 1, "AV_LOG_WARNING. ");
+		break;
+	case AV_LOG_INFO:
+		snprintf(out, size - 1, "AV_LOG_INFO. ");
+		break;
+	case AV_LOG_VERBOSE:
+		snprintf(out, size - 1, "AV_LOG_VERBOSE. ");
+		break;
+	case AV_LOG_DEBUG:
+		snprintf(out, size - 1, "AV_LOG_DEBUG. ");
+		break;
+	case AV_LOG_TRACE:
+		snprintf(out, size - 1, "AV_LOG_TRACE. ");
+		break;
+	default:
+		break;
+	}
+	if (strlen(s_cache) > 0)
+	{
+		snprintf(out + strlen(out), size - strlen(out) - 1, s_cache);
+		memset(s_cache, 0, size);
+	}
+	snprintf(out + strlen(out), size - strlen(out) - 1, s);
+	if (strlen(out) > 0)
+	{
+		out[strlen(out) - 1] = '\0';
+	}
+	// spdlog::log, spdlog::trace 等接口，不打印文件名、行号、函数名
+	spdlog::log(spdlog::level::level_enum::off, (out));
+#endif
+	return;
+}
