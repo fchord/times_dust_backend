@@ -2,9 +2,8 @@ package main
 
 /*
 
-#cgo LDFLAGS: -g -lstdc++ -lcpp_lib -lffmpeg_probe -lx264 -L./ -L./ffmpeg_module/build/ -L./ffmpeg_module/lib/x264/ -L./ffmpeg_module/lib/ffmpeg/n4.4/
+#cgo LDFLAGS: -g -lstdc++  -lffmpeg_probe -lx264 -L./ -L./ffmpeg_module/lib/ -L./ffmpeg_module/lib/x264/ -L./ffmpeg_module/lib/ffmpeg/n4.4/
 
-#include "cpp_lib.h"
 #include "ffmpeg_module/inc/ffmpeg_probe.h"
 
 */
